@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Intelligent Crop Analysis</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .upload-area {
+            border: 2px dashed #2c7a39;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            background-color: #f9f9f9;
+        }
+        .upload-area.highlight {
+            background-color: #f1f8e9;
+            border-color: #1b5e20;
+        }
+        #preview-image {
+            max-width: 100%;
+            height: auto;
+            display: none;
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .loader {
+            border: 8px solid #f3f3f3; /* Light grey */
+            border-top: 8px solid #3498db; /* Blue */
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 2s linear infinite;
+            margin: 20px auto;
+            display: none;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        #results-panel {
+            display: none;
+            margin-top: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #fff;
+        }
+        .health-meter {
+            background-color: #e0e0e0;
+            border-radius: 10px;
+            height: 20px;
+            overflow: hidden;
+        }
+        .health-indicator {
+            background-color: #5ec576;
+            height: 100%;
+            width: 0%;
+            border-radius: 10px;
+        }
+        .recommendation-item {
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .recommendation-item:last-child {
+            border-bottom: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <div class="upload-area" id="drop-area">
+            <form id="upload-form" enctype="multipart/form-data">
+                <p class="lead">Drag and drop your crop image here, or</p>
+                <input type="file" id="file-input" class="form-control-file" accept="image/*" style="display: none;">
+                <button type="button" class="btn btn-outline-success btn-sm" id="browse-button">Browse Files</button>
+                <p class="mt-2 text-muted"><small>Supported formats: JPG, PNG. Optimal analysis with clear, well-lit images.</small></p>
+                <div class="form-group mt-3">
+                    <label for="crop-select">Select Crop Type:</label>
+                    <select class="form-control" id="crop-select">
+                        {% for crop in crops %}
+                            <option value="{{ crop }}">{{ crop.capitalize() }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </form>
+            <img id="preview-image" src="#" alt="Image Preview">
+            <div class="loader" id="loader"></div>
+            <button type="button" class="btn btn-primary mt-3" id="analyze-button" style="display: none;">Initiate Analysis</button>
+        </div>
+
+        <div id="results-panel" style="display: none;">
+            <h3 class="mb-3">Crop Health Insights</h3>
+
+            <div class="row mb-2">
+                <div class="col-md-4">
+                    <strong>Identified Crop:</strong>
+                </div>
+                <div class="col-md-8" id="crop-type">
+                    -
+                </div>
+            </div>
+
+            <div class="row mb-2">
+                <div class="col-md-4">
+                    <strong>Observed Health:</strong>
+                </div>
+                <div class="col-md-8" id="health-status">
+                    -
+                </div>
+            </div>
+
+            <div class="row mb-3">
+              <div class="col-md-4">
+                <strong>Quantitative Health Score:</strong>
+            </div>
+            <div class="col-md-8">
+                <div class="health-meter">
+                    <div class="health-indicator" id="health-indicator"></div>
+                </div>
+                <span id="health-score">0</span>/100
+            </div>
+        </div>
+
+        <h4 class="mt-4 mb-2">Actionable Recommendations:</h4>
+        <ul id="recommendations-list" class="list-unstyled">
+        </ul>
+
+        <button type="button" class="btn btn-secondary mt-4" id="reset-button">Analyze Another Image</button>
+    </div>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const dropArea = document.getElementById('drop-area');
+        const fileInput = document.getElementById('file-input');
+        const browseButton = document.getElementById('browse-button');
+        const previewImage = document.getElementById('preview-image');
+        const analyzeButton = document.getElementById('analyze-button');
+        const resultsPanel = document.getElementById('results-panel');
+        const resetButton = document.getElementById('reset-button');
+        const loader = document.getElementById('loader');
+        const cropTypeElement = document.getElementById('crop-type');
+        const healthStatusElement = document.getElementById('health-status');
+        const healthScoreElement = document.getElementById('health-score');
+        const healthIndicator = document.getElementById('health-indicator');
+        const recommendationsList = document.getElementById('recommendations-list');
+        const cropSelect = document.getElementById('crop-select');
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropArea.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropArea.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight() {
+            dropArea.classList.add('highlight');
+        }
+
+        function unhighlight() {
+            dropArea.classList.remove('highlight');
+        }
+
+        dropArea.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const file = dt.files[0];
+            handleFile(file);
+        }
+
+        browseButton.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', function() {
+            if (this.files && this.files[0]) {
+                const file = this.files[0];
+                handleFile(file);
+            }
+        });
+
+        function handleFile(file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                previewImage.src = e.target.result;
+                previewImage.style.display = 'block';
+                analyzeButton.style.display = 'inline-block';
+            }
+            reader.readAsDataURL(file);
+        }
+
+        analyzeButton.addEventListener('click', function() {
+            if (!fileInput.files[0]) {
+                alert('Please select a crop image for analysis.');
+                return;
+            }
+
+            loader.style.display = 'block';
+            analyzeButton.style.display = 'none';
+            resultsPanel.style.display = 'none';
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('crop_type', cropSelect.value); 
+
+            fetch('/analyze', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                loader.style.display = 'none';
+
+                if (data.error) {
+                    alert('Analysis Error: ' + data.error);
+                    analyzeButton.style.display = 'inline-block';
+                    return;
+                }
+
+                cropTypeElement.textContent = data.crop_type.toUpperCase();
+                healthStatusElement.textContent = data.health_status;
+                healthScoreElement.textContent = data.health_score;
+                healthIndicator.style.width = data.health_score + '%';
+
+                if (data.health_score < 40) {
+                    healthIndicator.style.background = '#ff6b6b';
+                } else if (data.health_score < 70) {
+                    healthIndicator.style.background = '#feca57';
+                } else {
+                    healthIndicator.style.background = '#5ec576';
+                }
+
+                recommendationsList.innerHTML = '';
+                data.recommendations.forEach(recommendation => {
+                    const li = document.createElement('li');
+                    li.className = 'recommendation-item';
+                    li.textContent = recommendation;
+                    recommendationsList.appendChild(li);
+                });
+
+                resultsPanel.style.display = 'block';
+                dropArea.style.display = 'none';
+            })
+            .catch(error => {
+                loader.style.display = 'none';
+                analyzeButton.style.display = 'inline-block';
+                alert('Network Error: Could not upload image for analysis.');
+                console.error('Upload Error:', error);
+            });
+        });
+
+        resetButton.addEventListener('click', function() {
+        resultsPanel.style.display = 'none';
+        dropArea.style.display = 'block'; // ✅ fix this line
+        previewImage.style.display = 'none';
+        analyzeButton.style.display = 'none';
+        fileInput.value = '';
+        dropArea.classList.remove('highlight');
+        });
+    });
+</script>
+</body>
+</html>
